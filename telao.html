@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Telão – Quiz Brewteco</title>
+<link rel="stylesheet" href="estilo.css">
+<style>
+  main{max-width:1200px;margin:0 auto;padding:32px 28px 48px}
+  .topo{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:28px}
+  .topo h1{font-size:clamp(2rem,4vw,3.4rem);margin:0}
+  .acoes{display:flex;gap:10px;flex-wrap:wrap}
+  .entrada{display:grid;grid-template-columns:auto 1fr;gap:40px;align-items:center}
+  .qr{background:#fff;padding:18px;border-radius:18px;display:inline-block}
+  .qr img,.qr canvas{display:block}
+  .link{font-size:1.1rem;word-break:break-all;margin-top:12px}
+  .grande{font-size:clamp(3rem,8vw,6rem);font-weight:800;line-height:1;color:var(--ambar)}
+  .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+  .chip{background:var(--garrafa2);padding:8px 14px;border-radius:99px;font-weight:600}
+  .lista{display:grid;gap:10px;margin-top:10px}
+  .linha{display:grid;grid-template-columns:minmax(120px,240px) 1fr 70px;gap:14px;align-items:center}
+  .tubo{height:18px;background:var(--garrafa2);border-radius:99px;overflow:hidden}
+  .tubo span{display:block;height:100%;background:var(--ambar);transition:width .4s}
+  .podio{display:flex;justify-content:center;align-items:flex-end;gap:22px;margin:10px 0 36px}
+  .lugar{text-align:center;width:min(220px,30vw)}
+  .copo{position:relative;margin:10px auto 0;width:78%;border:4px solid var(--espuma);border-top:none;
+    border-radius:0 0 18px 18px;overflow:hidden;background:var(--garrafa2)}
+  .copo .chope{position:absolute;inset:auto 0 0 0;background:var(--ambar);height:0;animation:enche 1.6s ease-out forwards}
+  .copo .chope::before{content:"";position:absolute;top:-14px;left:0;right:0;height:16px;background:var(--espuma);border-radius:8px}
+  .lugar .nome{font-size:1.4rem;font-weight:800;margin-top:6px}
+  .medalha{font-size:2.6rem}
+  @keyframes enche{to{height:82%}}
+  table{width:100%;border-collapse:collapse;font-size:1.1rem}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--garrafa2)}
+  th{color:var(--texto-suave);font-weight:600}
+  td.num{font-variant-numeric:tabular-nums}
+  .tabela{overflow-x:auto}
+  @media (max-width:760px){.entrada{grid-template-columns:1fr;justify-items:center;text-align:center}}
+</style>
+</head>
+<body>
+<main id="app"><p class="suave">Carregando…</p></main>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="perguntas.js"></script>
+<script>
+// GABARITO: posição da resposta certa em cada pergunta (A=0, B=1, C=2, D=3)
+const GABARITO = [1, 2, 1, 2, 1, 0, 2, 1, 3, 2, 1, 2, 3, 1, 2];
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const AGORA = firebase.database.ServerValue.TIMESTAMP;
+const app = document.getElementById('app');
+const LINK = new URL('./', location.href).href; // endereço que os celulares abrem
+let estado = null, jogadores = {}, telaAtual = '';
+
+db.ref('quiz/estado').once('value').then(s => {
+  if (!s.val()) db.ref('quiz/estado').set({ status: 'espera', rodada: Date.now() });
+});
+db.ref('quiz/estado').on('value', s => { estado = s.val(); render(); });
+db.ref('quiz/jogadores').on('value', s => { jogadores = s.val() || {}; render(); });
+
+function esc(t){ const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+
+function comecar(){ db.ref('quiz/estado').update({ status: 'jogando', inicio: AGORA }); }
+function encerrar(){ if (confirm('Encerrar o quiz e mostrar o ranking?')) db.ref('quiz/estado').update({ status: 'fim' }); }
+function novoJogo(){
+  if (!confirm('Começar um novo jogo? Os participantes e respostas atuais serão apagados.')) return;
+  db.ref('quiz').set({ estado: { status: 'espera', rodada: Date.now() } });
+}
+
+function ranking(){
+  return Object.values(jogadores).map(j => {
+    const r = j.respostas || [];
+    let acertos = 0;
+    GABARITO.forEach((g,i) => { if (r[i] === g) acertos++; });
+    const tempo = (j.fim && estado.inicio) ? (j.fim - estado.inicio) / 1000 : Infinity;
+    return { nome: j.nome, acertos, tempo, respondidas: j.respondidas || 0 };
+  }).sort((a,b) => b.acertos - a.acertos || a.tempo - b.tempo);
+}
+function fmtTempo(s){
+  if (!isFinite(s)) return 'não terminou';
+  const m = Math.floor(s/60), seg = (s%60).toFixed(1);
+  return m ? `${m}min ${seg}s` : `${seg}s`;
+}
+
+function render(){
+  if (!estado) return;
+  const lista = Object.values(jogadores);
+  const total = lista.length;
+  const terminaram = lista.filter(j => j.fim).length;
+  let html = '';
+
+  if (estado.status === 'espera') {
+    html = `
+      <div class="topo"><h1>${esc(TITULO)} 🍻</h1>
+        <div class="acoes"><button class="btn-sec" id="novo">Novo jogo</button></div></div>
+      <div class="entrada">
+        <div><div class="qr" id="qr"></div><div class="link suave">${esc(LINK)}</div></div>
+        <div>
+          <p style="font-size:1.4rem">Aponte a câmera do celular para o QR code e digite seu nome.</p>
+          <div class="grande">${total}</div>
+          <p class="suave">${total === 1 ? 'pessoa conectada' : 'pessoas conectadas'}</p>
+          <button class="btn" id="comecar" ${total ? '' : 'disabled'}>Começar o quiz</button>
+        </div>
+      </div>
+      <div class="chips">${lista.map(j => `<span class="chip">${esc(j.nome)}</span>`).join('')}</div>`;
+  }
+  else if (estado.status === 'jogando') {
+    const ordem = [...lista].sort((a,b) => (b.respondidas||0) - (a.respondidas||0));
+    html = `
+      <div class="topo"><h1>Valendo! 🍺</h1>
+        <div class="acoes"><button class="btn" id="encerrar">Encerrar e ver ranking</button></div></div>
+      <p style="font-size:1.3rem">${terminaram} de ${total} já terminaram${terminaram === total && total ? ' — pode encerrar!' : ''}</p>
+      <div class="lista">
+        ${ordem.map(j => `<div class="linha"><strong>${esc(j.nome)}</strong>
+          <div class="tubo"><span style="width:${((j.respondidas||0)/PERGUNTAS.length)*100}%"></span></div>
+          <span class="suave">${j.respondidas||0}/${PERGUNTAS.length}</span></div>`).join('')}
+      </div>`;
+  }
+  else {
+    const r = ranking();
+    const top = [r[1], r[0], r[2]]; // 2º, 1º, 3º
+    const alturas = [150, 200, 115], medalhas = ['🥈','🥇','🥉'];
+    html = `
+      <div class="topo"><h1>Ranking 🏆</h1>
+        <div class="acoes"><button class="btn-sec" id="novo">Novo jogo</button></div></div>
+      <div class="podio">
+        ${top.map((p,i) => p ? `<div class="lugar"><div class="medalha">${medalhas[i]}</div>
+          <div class="nome">${esc(p.nome)}</div>
+          <div class="suave">${p.acertos}/${PERGUNTAS.length} · ${fmtTempo(p.tempo)}</div>
+          <div class="copo" style="height:${alturas[i]}px"><div class="chope"></div></div></div>` : '').join('')}
+      </div>
+      <div class="tabela"><table>
+        <thead><tr><th>#</th><th>Nome</th><th>Acertos</th><th>Tempo</th></tr></thead>
+        <tbody>${r.map((p,i) => `<tr><td class="num">${i+1}º</td><td>${esc(p.nome)}</td>
+          <td class="num">${p.acertos}/${PERGUNTAS.length}</td><td class="num">${fmtTempo(p.tempo)}</td></tr>`).join('')}</tbody>
+      </table></div>`;
+  }
+
+  // Só redesenha o pódio quando muda de tela (pra animação não repetir)
+  const chave = estado.status + JSON.stringify(jogadores);
+  if (chave === telaAtual) return;
+  telaAtual = chave;
+  app.innerHTML = html;
+
+  const qr = document.getElementById('qr');
+  if (qr) new QRCode(qr, { text: LINK, width: 280, height: 280 });
+  const b = id => document.getElementById(id);
+  if (b('comecar')) b('comecar').onclick = comecar;
+  if (b('encerrar')) b('encerrar').onclick = encerrar;
+  if (b('novo')) b('novo').onclick = novoJogo;
+}
+</script>
+</body>
+</html>
