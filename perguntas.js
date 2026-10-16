@@ -2,6 +2,10 @@
 // O gabarito fica só no arquivo telao.html.
 const TITULO = "Você conhece o Brew?";
 
+// Tempo (em segundos) para responder cada pergunta.
+// Se acabar o tempo, pula para a próxima e a pergunta vale zero.
+const TEMPO_POR_PERGUNTA = 40;
+
 const PERGUNTAS = [
   { p: "Quais destas cervejas estão disponíveis no OKTOBREW?", a: ["Brewteco Pilsen e Brewteco IPA", "Brewteco Festbier e Brewteco Czech", "Brewteco Weiss e Brewteco Stout", "Brewteco Lager e Brewteco Amber Ale"] },
   { p: "Qual corte de carne compõe o prato DO CAMPO?", a: ["Picanha", "Fraldinha", "Bife ancho", "Filé-mignon"] },
