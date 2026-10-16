@@ -35,6 +35,23 @@
   th{color:var(--texto-suave);font-weight:600}
   td.num{font-variant-numeric:tabular-nums}
   .tabela{overflow-x:auto}
+  .confete{position:fixed;inset:0;pointer-events:none;z-index:50}
+  .chopinho{position:fixed;bottom:-90px;z-index:40;pointer-events:none;animation:sobe linear forwards}
+  @keyframes sobe{to{transform:translateY(-125vh) rotate(30deg)}}
+  .suspense{position:relative;isolation:isolate;min-height:78vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden}
+  .raios{position:absolute;width:min(95vw,760px);aspect-ratio:1;border-radius:50%;z-index:-1;
+    background:repeating-conic-gradient(rgba(240,162,2,.2) 0 9deg,transparent 9deg 18deg);
+    -webkit-mask:radial-gradient(circle,#000 30%,transparent 70%);mask:radial-gradient(circle,#000 30%,transparent 70%);animation:roda 14s linear infinite}
+  .trofeu{font-size:clamp(8rem,22vw,15rem);line-height:1;filter:drop-shadow(0 0 40px rgba(240,162,2,.7));animation:balanca 2.2s ease-in-out infinite}
+  .suspense h2{font-size:clamp(2rem,5vw,3.6rem);margin:.4em 0 .2em}
+  .suspense .btn{margin-top:28px;font-size:1.4rem}
+  @keyframes roda{to{transform:rotate(360deg)}}
+  @keyframes balanca{0%,100%{transform:rotate(-7deg) scale(1)}50%{transform:rotate(7deg) scale(1.08)}}
+  .lugar{opacity:0;animation:surge .7s cubic-bezier(.2,1.4,.4,1) forwards}
+  .lugar .copo,.lugar .copo .chope{animation-delay:inherit}
+  @keyframes surge{from{opacity:0;transform:translateY(60px) scale(.8)}to{opacity:1;transform:none}}
+  .campeao .nome{font-size:2rem;color:var(--ambar)}
+  .tabela{opacity:0;animation:surge .6s ease-out 3.4s forwards}
   @media (max-width:760px){.entrada{grid-template-columns:1fr;justify-items:center;text-align:center}}
 </style>
 </head>
@@ -55,7 +72,7 @@ const db = firebase.database();
 const AGORA = firebase.database.ServerValue.TIMESTAMP;
 const app = document.getElementById('app');
 const LINK = new URL('./', location.href).href; // endereço que os celulares abrem
-let estado = null, jogadores = {}, telaAtual = '';
+let estado = null, jogadores = {}, telaAtual = '', ultimoStatus = null;
 
 db.ref('quiz/estado').once('value').then(s => {
   if (!s.val()) db.ref('quiz/estado').set({ status: 'espera', rodada: Date.now() });
@@ -63,22 +80,60 @@ db.ref('quiz/estado').once('value').then(s => {
 db.ref('quiz/estado').on('value', s => { estado = s.val(); render(); });
 db.ref('quiz/jogadores').on('value', s => { jogadores = s.val() || {}; render(); });
 
+// ---------- Efeitos de festa (confete e chopes) ----------
+const semMovimento = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function confete(duracao){
+  if (semMovimento) return;
+  const c = document.createElement('canvas'); c.className = 'confete'; document.body.appendChild(c);
+  const ctx = c.getContext('2d'), cores = ['#f0a202','#fff4dc','#ff7a59','#7bd389','#5bc0eb','#ffd23f'];
+  let W, H; const tam = () => { W = c.width = innerWidth; H = c.height = innerHeight; }; tam(); addEventListener('resize', tam);
+  const ps = [], fim = Date.now() + duracao;
+  const add = n => { for (let i = 0; i < n; i++) ps.push({ x: Math.random()*W, y: -20, vx: (Math.random()-.5)*4, vy: 2+Math.random()*4,
+    r: Math.random()*6.28, vr: (Math.random()-.5)*.3, w: 6+Math.random()*8, h: 8+Math.random()*10, c: cores[(Math.random()*cores.length)|0] }); };
+  (function loop(){
+    if (Date.now() < fim) add(W > 700 ? 7 : 3);
+    ctx.clearRect(0, 0, W, H);
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const p = ps[i]; p.x += p.vx; p.y += p.vy; p.vy += .04; p.r += p.vr;
+      if (p.y > H + 30) { ps.splice(i, 1); continue; }
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c; ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h); ctx.restore();
+    }
+    if (ps.length || Date.now() < fim) requestAnimationFrame(loop); else c.remove();
+  })();
+}
+function chopes(duracao){
+  if (semMovimento) return;
+  const fim = Date.now() + duracao;
+  const t = setInterval(() => {
+    if (Date.now() > fim) return clearInterval(t);
+    const s = document.createElement('span'); s.className = 'chopinho'; s.textContent = Math.random() < .5 ? '🍺' : '🍻';
+    s.style.left = Math.random()*92 + 'vw'; s.style.fontSize = (32 + Math.random()*50) + 'px';
+    s.style.animationDuration = (4 + Math.random()*3) + 's';
+    document.body.appendChild(s); setTimeout(() => s.remove(), 8000);
+  }, 220);
+}
+
 function esc(t){ const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
 
 function comecar(){ db.ref('quiz/estado').update({ status: 'jogando', inicio: AGORA }); }
-function encerrar(){ if (confirm('Encerrar o quiz e mostrar o ranking?')) db.ref('quiz/estado').update({ status: 'fim' }); }
+function encerrar(){ if (confirm('Encerrar o quiz? Os celulares vão parar de aceitar respostas.')) db.ref('quiz/estado').update({ status: 'fim' }); }
+function revelar(){
+  const r = ranking(), posicoes = {};
+  r.forEach((p, i) => posicoes[p.id] = i + 1);
+  db.ref('quiz/estado').update({ status: 'resultado', vencedor: r[0] ? r[0].id : null, posicoes });
+}
 function novoJogo(){
   if (!confirm('Começar um novo jogo? Os participantes e respostas atuais serão apagados.')) return;
   db.ref('quiz').set({ estado: { status: 'espera', rodada: Date.now() } });
 }
 
 function ranking(){
-  return Object.values(jogadores).map(j => {
+  return Object.entries(jogadores).map(([id, j]) => {
     const r = j.respostas || [];
     let acertos = 0;
     GABARITO.forEach((g,i) => { if (r[i] === g) acertos++; });
     const tempo = (j.fim && estado.inicio) ? (j.fim - estado.inicio) / 1000 : Infinity;
-    return { nome: j.nome, acertos, tempo, respondidas: j.respondidas || 0 };
+    return { id, nome: j.nome, acertos, tempo, respondidas: j.respondidas || 0 };
   }).sort((a,b) => b.acertos - a.acertos || a.tempo - b.tempo);
 }
 function fmtTempo(s){
@@ -113,7 +168,7 @@ function render(){
     const ordem = [...lista].sort((a,b) => (b.respondidas||0) - (a.respondidas||0));
     html = `
       <div class="topo"><h1>Valendo! 🍺</h1>
-        <div class="acoes"><button class="btn" id="encerrar">Encerrar e ver ranking</button></div></div>
+        <div class="acoes"><button class="btn" id="encerrar">Encerrar quiz</button></div></div>
       <p style="font-size:1.3rem">${terminaram} de ${total} já terminaram${terminaram === total && total ? ' — pode encerrar!' : ''}</p>
       <div class="lista">
         ${ordem.map(j => `<div class="linha"><strong>${esc(j.nome)}</strong>
@@ -121,15 +176,25 @@ function render(){
           <span class="suave">${j.respondidas||0}/${PERGUNTAS.length}</span></div>`).join('')}
       </div>`;
   }
+  else if (estado.status === 'fim') {
+    html = `
+      <div class="suspense">
+        <div class="raios"></div>
+        <div class="trofeu">🏆</div>
+        <h2>E o grande vencedor é…</h2>
+        <p class="suave" style="font-size:1.2rem">${total} ${total === 1 ? 'pessoa participou' : 'pessoas participaram'}. Quem levou o prêmio?</p>
+        <button class="btn" id="revelar">Revelar o pódio</button>
+      </div>`;
+  }
   else {
     const r = ranking();
     const top = [r[1], r[0], r[2]]; // 2º, 1º, 3º
-    const alturas = [150, 200, 115], medalhas = ['🥈','🥇','🥉'];
+    const alturas = [150, 200, 115], medalhas = ['🥈','🥇','🥉'], atrasos = [1.3, 2.4, .3];
     html = `
       <div class="topo"><h1>Ranking 🏆</h1>
         <div class="acoes"><button class="btn-sec" id="novo">Novo jogo</button></div></div>
       <div class="podio">
-        ${top.map((p,i) => p ? `<div class="lugar"><div class="medalha">${medalhas[i]}</div>
+        ${top.map((p,i) => p ? `<div class="lugar${i===1?' campeao':''}" style="animation-delay:${atrasos[i]}s"><div class="medalha">${medalhas[i]}</div>
           <div class="nome">${esc(p.nome)}</div>
           <div class="suave">${p.acertos}/${PERGUNTAS.length} · ${fmtTempo(p.tempo)}</div>
           <div class="copo" style="height:${alturas[i]}px"><div class="chope"></div></div></div>` : '').join('')}
@@ -153,6 +218,13 @@ function render(){
   if (b('comecar')) b('comecar').onclick = comecar;
   if (b('encerrar')) b('encerrar').onclick = encerrar;
   if (b('novo')) b('novo').onclick = novoJogo;
+  if (b('revelar')) b('revelar').onclick = revelar;
+
+  // Festa quando o pódio aparece
+  if (estado.status === 'resultado' && ultimoStatus !== 'resultado') {
+    setTimeout(() => { confete(7000); chopes(12000); }, 2400);
+  }
+  ultimoStatus = estado.status;
 }
 </script>
 </body>

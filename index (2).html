@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quiz Brewteco 🍻</title>
+<link rel="stylesheet" href="estilo.css">
+<style>
+  main{max-width:560px;margin:0 auto;padding:24px 20px 40px;min-height:100vh;display:flex;flex-direction:column}
+  .centro{flex:1;display:flex;flex-direction:column;justify-content:center;text-align:center}
+  .titulo{font-size:2.3rem}
+  .emoji{font-size:4rem;margin-bottom:.2em}
+  input{width:100%;font:inherit;font-size:1.2rem;padding:.8em 1em;border-radius:14px;
+    border:2px solid var(--garrafa2);background:var(--espuma);color:var(--garrafa);margin:.4em 0 1em}
+  .barra{height:10px;background:var(--garrafa2);border-radius:99px;overflow:hidden;margin:6px 0 22px}
+  .barra span{display:block;height:100%;background:var(--ambar);transition:width .25s}
+  .contador{font-weight:600;color:var(--texto-suave);font-size:.95rem}
+  .pergunta{font-size:1.5rem;margin:0 0 20px}
+  .opcoes{display:grid;gap:12px}
+  .opcao{display:flex;gap:14px;align-items:center;text-align:left;background:var(--espuma);color:var(--garrafa);
+    padding:16px;border-radius:14px;font-size:1.05rem;font-weight:600;box-shadow:0 4px 0 #d8c9a4;min-height:64px}
+  .opcao:active{transform:translateY(3px);box-shadow:0 1px 0 #d8c9a4}
+  .letra{flex:none;width:36px;height:36px;border-radius:50%;background:var(--ambar);display:grid;place-items:center;font-weight:800}
+  .espera-gota{width:70px;height:70px;margin:0 auto 18px;border-radius:50%;background:var(--ambar);animation:pulsa 1.4s ease-in-out infinite}
+  .relogio{display:flex;align-items:center;gap:12px;margin:-8px 0 20px}
+  .relogio .tubo{flex:1;height:8px;background:var(--garrafa2);border-radius:99px;overflow:hidden}
+  .relogio .tubo span{display:block;height:100%;background:var(--espuma);transition:width .2s linear}
+  .relogio b{font-size:1.4rem;min-width:2.2ch;text-align:right;font-variant-numeric:tabular-nums}
+  .relogio.alerta .tubo span{background:#ff7a59}
+  .relogio.alerta b{color:#ff7a59}
+  .confete{position:fixed;inset:0;pointer-events:none;z-index:50}
+  .chopinho{position:fixed;bottom:-90px;z-index:40;pointer-events:none;animation:sobe linear forwards}
+  @keyframes sobe{to{transform:translateY(-125vh) rotate(30deg)}}
+  .ganhou h1{font-size:clamp(2.4rem,11vw,3.6rem);color:var(--ambar)}
+  .ganhou .premio{font-size:1.5rem;font-weight:800;line-height:1.2}
+  .ganhou .emoji{font-size:6rem;animation:pula 1s ease-in-out infinite}
+  @keyframes pula{50%{transform:translateY(-14px) scale(1.06)}}
+  @keyframes pulsa{50%{transform:scale(.8);opacity:.6}}
+</style>
+</head>
+<body>
+<main id="app"><div class="centro"><p class="suave">Carregando…</p></div></main>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="config.js"></script>
+<script src="perguntas.js"></script>
+<script>
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const AGORA = firebase.database.ServerValue.TIMESTAMP;
+const app = document.getElementById('app');
+let estado = null, carregado = false, relogio = null, pausa = false, festejou = false;
+
+// Guarda quem é o jogador no próprio celular (se recarregar a página, continua de onde parou)
+let eu = null;
+try { eu = JSON.parse(localStorage.getItem('quizBrewEu')); } catch(e) {}
+function salvarEu(){ try { localStorage.setItem('quizBrewEu', JSON.stringify(eu)); } catch(e) {} }
+
+db.ref('quiz/estado').on('value', s => {
+  const antes = estado && estado.status;
+  estado = s.val(); carregado = true;
+  // Segura o resultado no celular até o 1º lugar aparecer no telão
+  if (carregado && antes === 'fim' && estado && estado.status === 'resultado') setTimeout(render, 2500);
+  else render();
+});
+
+// ---------- Efeitos de festa (confete e chopes) ----------
+const semMovimento = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function confete(duracao){
+  if (semMovimento) return;
+  const c = document.createElement('canvas'); c.className = 'confete'; document.body.appendChild(c);
+  const ctx = c.getContext('2d'), cores = ['#f0a202','#fff4dc','#ff7a59','#7bd389','#5bc0eb','#ffd23f'];
+  let W, H; const tam = () => { W = c.width = innerWidth; H = c.height = innerHeight; }; tam(); addEventListener('resize', tam);
+  const ps = [], fim = Date.now() + duracao;
+  const add = n => { for (let i = 0; i < n; i++) ps.push({ x: Math.random()*W, y: -20, vx: (Math.random()-.5)*4, vy: 2+Math.random()*4,
+    r: Math.random()*6.28, vr: (Math.random()-.5)*.3, w: 6+Math.random()*8, h: 8+Math.random()*10, c: cores[(Math.random()*cores.length)|0] }); };
+  (function loop(){
+    if (Date.now() < fim) add(W > 700 ? 7 : 3);
+    ctx.clearRect(0, 0, W, H);
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const p = ps[i]; p.x += p.vx; p.y += p.vy; p.vy += .04; p.r += p.vr;
+      if (p.y > H + 30) { ps.splice(i, 1); continue; }
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c; ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h); ctx.restore();
+    }
+    if (ps.length || Date.now() < fim) requestAnimationFrame(loop); else c.remove();
+  })();
+}
+function chopes(duracao){
+  if (semMovimento) return;
+  const fim = Date.now() + duracao;
+  const t = setInterval(() => {
+    if (Date.now() > fim) return clearInterval(t);
+    const s = document.createElement('span'); s.className = 'chopinho'; s.textContent = Math.random() < .5 ? '🍺' : '🍻';
+    s.style.left = Math.random()*92 + 'vw'; s.style.fontSize = (32 + Math.random()*50) + 'px';
+    s.style.animationDuration = (4 + Math.random()*3) + 's';
+    document.body.appendChild(s); setTimeout(() => s.remove(), 8000);
+  }, 220);
+}
+
+function esc(t){ const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+
+function render(){
+  clearInterval(relogio);
+  if (!carregado || pausa) return;
+  if (!estado) {
+    app.innerHTML = `<div class="centro"><div class="emoji">🍺</div><h1>Quase lá</h1><p class="suave">O quiz ainda não foi aberto. Aguarde o apresentador.</p></div>`;
+    return;
+  }
+  const minhaRodada = eu && eu.rodada === estado.rodada;
+
+  if (!minhaRodada) {
+    if (estado.status === 'fim' || estado.status === 'resultado') {
+      app.innerHTML = `<div class="centro"><div class="emoji">🏁</div><h1>Quiz encerrado</h1><p class="suave">Confira o ranking no telão.</p></div>`;
+      return;
+    }
+    app.innerHTML = `<div class="centro">
+      <div class="emoji">🍻</div>
+      <h1 class="titulo">${esc(TITULO)}</h1>
+      <p class="suave">${PERGUNTAS.length} perguntas. Quem acertar mais e terminar primeiro ganha.</p>
+      <label for="nome" style="text-align:left;font-weight:600">Seu nome</label>
+      <input id="nome" maxlength="30" autocomplete="name" placeholder="Ex.: Ana - Brew Gávea">
+      <button class="btn" id="entrar">Entrar no quiz</button>
+    </div>`;
+    const inp = document.getElementById('nome'), b = document.getElementById('entrar');
+    b.onclick = () => entrar(inp.value);
+    inp.onkeydown = e => { if (e.key === 'Enter') entrar(inp.value); };
+    return;
+  }
+
+  if (estado.status === 'fim') {
+    app.innerHTML = `<div class="centro"><div class="espera-gota"></div><h1>E aí, bora ver se você ganhou?</h1><p class="suave">Olho no telão! 👀</p></div>`;
+    return;
+  }
+
+  if (estado.status === 'resultado') {
+    const pos = (estado.posicoes || {})[eu.id];
+    if (estado.vencedor === eu.id) {
+      app.innerHTML = `<div class="centro ganhou"><div class="emoji">🏆</div><h1>VOCÊ GANHOU!</h1><p class="premio">RETIRE SEU PRÊMIO MEGA ESPECIAL! 🎁</p></div>`;
+      if (!festejou) { festejou = true; confete(8000); chopes(10000); }
+    } else {
+      const med = pos === 2 ? '🥈' : pos === 3 ? '🥉' : '🍻';
+      app.innerHTML = `<div class="centro"><div class="emoji">${med}</div><h1>${pos ? `Você ficou em ${pos}º lugar!` : 'Quiz encerrado!'}</h1><p class="suave">Não foi dessa vez, mas valeu demais por participar, ${esc(eu.nome)}!</p></div>`;
+    }
+    return;
+  }
+
+  if (eu.terminou) {
+    app.innerHTML = `<div class="centro"><div class="emoji">✅</div><h1>Respostas enviadas!</h1><p class="suave">Valeu, ${esc(eu.nome)}. Aguarde o resultado no telão.</p></div>`;
+    return;
+  }
+
+  if (estado.status === 'espera') {
+    app.innerHTML = `<div class="centro"><div class="espera-gota"></div><h1>Você está dentro, ${esc(eu.nome)}!</h1><p class="suave">Aguarde o apresentador começar. Fique de olho: o tempo conta!</p></div>`;
+    return;
+  }
+
+  // Jogando
+  const i = eu.respostas.length;
+  const q = PERGUNTAS[i];
+  // Marca quando essa pergunta apareceu (se recarregar a página, o tempo continua correndo)
+  if (!eu.q || eu.q.i !== i) { eu.q = { i, t: Date.now() }; salvarEu(); }
+  app.innerHTML = `
+    <div class="contador">Pergunta ${i+1} de ${PERGUNTAS.length}</div>
+    <div class="barra"><span style="width:${(i/PERGUNTAS.length)*100}%"></span></div>
+    <div class="relogio" id="relogio"><div class="tubo"><span id="tempoBarra"></span></div><b id="tempoSeg"></b></div>
+    <h2 class="pergunta">${esc(q.p)}</h2>
+    <div class="opcoes">
+      ${q.a.map((t,k)=>`<button class="opcao" data-k="${k}"><span class="letra">${'ABCD'[k]}</span><span>${esc(t)}</span></button>`).join('')}
+    </div>`;
+  app.querySelectorAll('.opcao').forEach(b => b.onclick = () => responder(+b.dataset.k));
+
+  const caixa = document.getElementById('relogio'), barra = document.getElementById('tempoBarra'), seg = document.getElementById('tempoSeg');
+  const tick = () => {
+    const resta = Math.max(0, TEMPO_POR_PERGUNTA - (Date.now() - eu.q.t) / 1000);
+    seg.textContent = Math.ceil(resta);
+    barra.style.width = (resta / TEMPO_POR_PERGUNTA) * 100 + '%';
+    caixa.classList.toggle('alerta', resta <= 10);
+    if (resta <= 0) { clearInterval(relogio); tempoEsgotado(); }
+  };
+  tick();
+  relogio = setInterval(tick, 200);
+}
+
+function tempoEsgotado(){
+  pausa = true;
+  app.innerHTML = `<div class="centro"><div class="emoji">⏰</div><h1>Tempo esgotado!</h1><p class="suave">Essa não valeu ponto. Vamos pra próxima.</p></div>`;
+  setTimeout(() => { pausa = false; responder(-1); }, 1500);
+}
+
+function entrar(nome){
+  nome = (nome || '').trim();
+  if (!nome) { alert('Digite seu nome para entrar.'); return; }
+  const novo = db.ref('quiz/jogadores').push();
+  novo.set({ nome, entrou: AGORA, respondidas: 0 });
+  eu = { rodada: estado.rodada, id: novo.key, nome, respostas: [], terminou: false };
+  salvarEu(); render();
+}
+
+let ocupado = false;
+function responder(k){
+  if (ocupado && k !== -1) return; ocupado = true;
+  clearInterval(relogio);
+  const i = eu.respostas.length;
+  eu.respostas.push(k);
+  const upd = {};
+  upd['respostas/' + i] = k;
+  upd['respondidas'] = eu.respostas.length;
+  if (eu.respostas.length >= PERGUNTAS.length) { upd['fim'] = AGORA; eu.terminou = true; }
+  db.ref('quiz/jogadores/' + eu.id).update(upd);
+  salvarEu(); render();
+  setTimeout(() => ocupado = false, 250); // evita toque duplo pular pergunta
+}
+</script>
+</body>
+</html>
